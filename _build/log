@@ -1,0 +1,6 @@
+# dune init proj ocamlMessager
+# OCAMLPARAM: unset
+# Shared cache: disabled
+# Shared cache location: /Users/willrabalais/.cache/dune/db
+# Workspace root: /Users/willrabalais/Code/Projects/ocamlMessager/ocamlMessager
+# Auto-detected concurrency: 10

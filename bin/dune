@@ -1,0 +1,4 @@
+(executable
+ (public_name ocamlMessager)
+ (name main)
+ (libraries ocamlMessager))

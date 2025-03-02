@@ -5,11 +5,11 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github WillRabalais04/ocamlMessager))
 
-(authors "Author Name")
+(authors "Will Rabalais")
 
-(maintainers "Maintainer Name")
+(maintainers "Will Rabalais")
 
 (license LICENSE)
 
@@ -23,4 +23,3 @@
  (tags
   (topics "to describe" your project)))
 
-; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

@@ -1,4 +1,4 @@
 (executable
- (public_name ocamlMessager)
  (name main)
- (libraries ocamlMessager))
+ (modules main client server) 
+ (libraries lwt lwt.unix))

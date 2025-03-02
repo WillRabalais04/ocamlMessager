@@ -1,6 +1,16 @@
-# dune init proj ocamlMessager
+# dune build
 # OCAMLPARAM: unset
 # Shared cache: disabled
 # Shared cache location: /Users/willrabalais/.cache/dune/db
-# Workspace root: /Users/willrabalais/Code/Projects/ocamlMessager/ocamlMessager
+# Workspace root: /Users/willrabalais/Code/Projects/ocamlMessager
 # Auto-detected concurrency: 10
+# Dune context:
+#  { name = "default"
+#  ; kind = "default"
+#  ; profile = Dev
+#  ; merlin = true
+#  ; fdo_target_exe = None
+#  ; build_dir = In_build_dir "default"
+#  ; instrument_with = []
+#  }
+$ /Users/willrabalais/.opam/4.14.0/bin/ocamlc.opt -config > /var/folders/07/09bmnc693h34dvfv47mx5ln00000gn/T/dune_55f968_output

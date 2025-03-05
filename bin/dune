@@ -1,4 +1,11 @@
 (executable
- (name main)
- (modules main client server) 
- (libraries lwt lwt.unix))
+ (name client)
+ (modules client) 
+ (libraries lwt lwt.unix threads)
+ (flags (-thread)))
+
+(executable
+ (name server)
+ (modules server) 
+ (libraries lwt lwt.unix threads)
+ (flags (-thread)))

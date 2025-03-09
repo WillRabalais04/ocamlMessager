@@ -6,38 +6,62 @@ let ( let* ) = Lwt.bind
 let port = 8080
 
 let converse (input, output) = 
-  let rec poll_messages () = 
-    Lwt.catch (fun () ->
+  (let rec send () = 
+    (let* line = Lwt_io.read_line Lwt_io.stdin in 
+    let kick = 
+      try Some (Scanf.sscanf line "KICK %s" (fun client -> client))
+      with _ -> None
+    in 
+    match line, kick with 
+    | "EXIT", _ ->  
+      let* () = Lwt_io.close output in
+      let* () = Lwt_io.close input in
+      let* () = Lwt_io.printl("Shutting down server...") in 
+      Lwt.return_unit
+    | _,Some client -> 
+      let* () = Lwt_io.printlf "Kicking client %s." client in
+      let* () = Lwt_io.close output in 
+      Lwt.return_unit
+    | msg,_ ->     
+      let* () = Lwt_io.write_line output msg in 
+      (* let* () = Lwt_io.flush_all () in
+      let* read_receipt = Lwt_io.read_line input in 
+      let* () = Lwt_io.printlf " %s - %d" read_receipt 0 in  *)
+      send()) in
+
+  let rec poll () = 
+    (Lwt.catch (fun () ->
       let* line = Lwt_io.read_line_opt input in 
       match line with 
       | None ->  
-        Lwt_io.printl("Client disconnected.")
+        let* () = Lwt_io.write_line output "❌" in
+        let* () = Lwt_io.printl("Client disconnected.") in
+        Lwt.return_unit
       | Some msg -> 
-        match msg with 
-        | "SHUTDOWN" -> Lwt_io.printl("EXITING...")
-        | _ -> 
-          let* () = Lwt_io.printf "Client: %s\n" msg in
-          let* message =  Lwt_io.read_line Lwt_io.stdin in 
-          let* () = Lwt_io.write_line output message in
-          let* () = Lwt_io.flush Lwt_io.stdout in
-          poll_messages ())  
+        let* () = Lwt_io.printf "Client: %s\n" msg in
+        (* let* () = Lwt_io.write_line output "Received✅" in
+        let* () = Lwt_io.flush_all () in  *)
+        poll())  
       (fun exc ->
-        Lwt_io.printlf "Client error: %s" (Printexc.to_string exc))
-  in poll_messages ()
+        let* () = Lwt_io.printlf "Client error: %s" (Printexc.to_string exc) in 
+        Lwt.return_unit)) in 
+  Lwt.join [poll(); send()]) 
 
 let rec listen socket = 
   let* result = Lwt.catch
     (fun () -> 
       let* client = Lwt_unix.accept socket in 
-      Lwt.return_some client)
+      Lwt.return_some client) 
     (fun exc -> 
-      Lwt_io.printlf "Error accepting connection: %s" (Printexc.to_string exc) 
-      >>= fun () -> Lwt.return_none) 
+      let* ()  = Lwt_io.printlf "Error accepting connection: %s" (Printexc.to_string exc) in 
+      Lwt.return_none) 
   in match result with 
-  | None -> listen socket
+  | None -> Lwt.return_unit
   | Some (client_socket, _) -> 
     let input = Lwt_io.of_fd ~mode:Lwt_io.input client_socket in 
     let output = Lwt_io.of_fd ~mode:Lwt_io.output client_socket in 
+    let*() = printl "Client joined the server!" in 
+    let* () = Lwt_io.write_line output "Welcome to the server!" in 
     Lwt.async (fun () -> converse (input, output));
     listen socket
 

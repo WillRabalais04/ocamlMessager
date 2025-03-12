@@ -1,5 +1,5 @@
 (executable
- (name main)
- (modules main) 
+ (name chat)
+ (modules chat) 
  (libraries lwt lwt.unix threads mtime mtime.clock.os)
  (flags (-thread)))

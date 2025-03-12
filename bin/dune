@@ -1,11 +1,5 @@
 (executable
- (name client)
- (modules client) 
- (libraries lwt lwt.unix threads)
- (flags (-thread)))
-
-(executable
- (name server)
- (modules server) 
- (libraries lwt lwt.unix threads)
+ (name main)
+ (modules main) 
+ (libraries lwt lwt.unix threads mtime mtime.clock.os)
  (flags (-thread)))

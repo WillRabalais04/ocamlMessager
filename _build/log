@@ -1,4 +1,4 @@
-# dune exec -- ./bin/chat.exe --client 172.24.71.170
+# dune exec -- ./bin/chat.exe --server
 # OCAMLPARAM: unset
 # Shared cache: disabled
 # Shared cache location: /Users/willrabalais/.cache/dune/db
@@ -13,4 +13,6 @@
 #  ; build_dir = In_build_dir "default"
 #  ; instrument_with = []
 #  }
-$ /Users/willrabalais/.opam/4.14.0/bin/ocamlc.opt -config > /var/folders/07/09bmnc693h34dvfv47mx5ln00000gn/T/dune_6113c1_output
+$ /Users/willrabalais/.opam/4.14.0/bin/ocamlc.opt -config > /var/folders/07/09bmnc693h34dvfv47mx5ln00000gn/T/dune_59e226_output
+$ (cd _build/default && /Users/willrabalais/.opam/4.14.0/bin/ocamlopt.opt -thread -g -I bin/.chat.eobjs/byte -I bin/.chat.eobjs/native -I /Users/willrabalais/.opam/4.14.0/lib/bytes -I /Users/willrabalais/.opam/4.14.0/lib/lwt -I /Users/willrabalais/.opam/4.14.0/lib/lwt/unix -I /Users/willrabalais/.opam/4.14.0/lib/mtime -I /Users/willrabalais/.opam/4.14.0/lib/mtime/clock/os -I /Users/willrabalais/.opam/4.14.0/lib/ocaml/threads -I /Users/willrabalais/.opam/4.14.0/lib/ocplib-endian -I /Users/willrabalais/.opam/4.14.0/lib/ocplib-endian/bigstring -intf-suffix .ml -no-alias-deps -opaque -o bin/.chat.eobjs/native/dune__exe__Chat.cmx -c -impl bin/chat.ml)
+$ (cd _build/default && /Users/willrabalais/.opam/4.14.0/bin/ocamlopt.opt -thread -g -o bin/chat.exe /Users/willrabalais/.opam/4.14.0/lib/lwt/lwt.cmxa /Users/willrabalais/.opam/4.14.0/lib/ocaml/unix.cmxa -I /Users/willrabalais/.opam/4.14.0/lib/ocaml /Users/willrabalais/.opam/4.14.0/lib/ocaml/bigarray.cmxa -I /Users/willrabalais/.opam/4.14.0/lib/ocaml /Users/willrabalais/.opam/4.14.0/lib/ocplib-endian/ocplib_endian.cmxa /Users/willrabalais/.opam/4.14.0/lib/ocplib-endian/bigstring/ocplib_endian_bigstring.cmxa /Users/willrabalais/.opam/4.14.0/lib/ocaml/threads/threads.cmxa -I /Users/willrabalais/.opam/4.14.0/lib/ocaml /Users/willrabalais/.opam/4.14.0/lib/lwt/unix/lwt_unix.cmxa -I /Users/willrabalais/.opam/4.14.0/lib/lwt/unix /Users/willrabalais/.opam/4.14.0/lib/mtime/mtime.cmxa /Users/willrabalais/.opam/4.14.0/lib/mtime/clock/os/mtime_clock.cmxa -I /Users/willrabalais/.opam/4.14.0/lib/mtime/clock/os bin/.chat.eobjs/native/dune__exe__Chat.cmx)

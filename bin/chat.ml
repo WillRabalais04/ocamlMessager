@@ -15,7 +15,7 @@ let usage =
     Printf.sprintf "Usage: ./%s --server [PORT] OR ./%s --client HOST [PORT]\n" program_name program_name 
 
 let get_time() = 
-  Mtime.to_uint64_ns (Mtime_clock.now ())
+(Mtime_clock.now_ns ())
 
 let interpret_message channel = 
   let rec read input_channel buffer pos len = 
@@ -87,15 +87,17 @@ let converse socket =
       | Some (msg_type, sent_time, contents) -> 
         let received_time = get_time() in
         let sender = if (!mode = "SERVER") then "client" else "server" in 
-        let contents = (Bytes.to_string contents) in 
         match msg_type with 
         | Message -> 
-          let trip_time = Int64.sub received_time sent_time in 
-          let* () = write_message output Receipt (Int64.to_string trip_time) in 
-          let* () = Lwt_io.printlf "%s: %s" (String.capitalize_ascii sender) contents in 
+          let* () = write_message output Receipt (Int64.to_string sent_time) in 
+          let* () = Lwt_io.printlf "%s: %s" (String.capitalize_ascii sender) (Bytes.to_string contents) in 
           loop()
+          (* sender sends t1-> receiver recieves t2-> receiver sends receipt t3-> sender receives receipt t4
+          rtt = t1 - t4 *)
         | Receipt -> 
-          let* () = Lwt_io.printlf "✅ Received by %s! - %s ns" sender contents in
+          let sent_time = Int64.of_string (Bytes.to_string contents) in
+          let rtt = Int64.sub received_time sent_time in 
+          let* () = Lwt_io.printlf "✅ Received by %s! - %Ld ns" sender rtt in
           loop()
     in loop()
   in 

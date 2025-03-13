@@ -9,7 +9,6 @@ let (let*) = Lwt.bind
 
 type message = Message | Receipt (* msg format: [type (1 byte)][timestamp (8 bytes)][msg length (4 bytes)][msg (N bytes)] *)
 let mode = ref ""
-let shutdown = ref false
 
 let usage = 
   let program_name = Sys.argv.(0) in 
@@ -56,13 +55,32 @@ let write_message output_channel msg_type msg =
   let* () = Lwt_io.write_from_exactly output_channel msg 0 msg_len in 
   Lwt_io.flush output_channel
 
+let stdin_stream  = 
+  let stream, push = Lwt_stream.create () in 
+  Lwt.async ( fun () -> 
+    let rec loop () = 
+      let* line = Lwt_io.read_line Lwt_io.stdin in 
+      push (Some line);
+      loop ()
+    in loop ());
+    stream 
+
+let shutdown_stream = Lwt_stream.clone stdin_stream
+let send_stream = Lwt_stream.clone stdin_stream
+
+let rec check_exit() = 
+  let* line = Lwt_stream.next shutdown_stream in 
+    if String.lowercase_ascii line = "exit" then 
+      exit 0
+  else 
+    check_exit()
+
 let converse socket = 
   let input = Lwt_io.of_fd ~mode:Lwt_io.input socket in 
   let output = Lwt_io.of_fd ~mode:Lwt_io.output socket in
 
   let poll = 
     let rec loop() = 
-      if !shutdown then Lwt.return_unit else 
       let* msg = interpret_message input in 
       match msg with 
       | None -> Lwt.return_unit
@@ -83,30 +101,28 @@ let converse socket =
   in 
   let send = 
     let rec loop() = 
-      if !shutdown then Lwt.return_unit else 
-      let* msg = Lwt_io.read_line Lwt_io.stdin in 
+      let* msg = Lwt_stream.next send_stream in 
       if (String.lowercase_ascii msg) = "exit" then 
         let* () = write_message output Message "Exiting..." in
         let* () = Lwt_io.flush output in
-        shutdown := true;
         exit 0;
     else
-      let* () = write_message output Message msg
-      in loop()
-    in loop() in 
-  let send_and_poll = Lwt.pick [send; poll] in
-    Lwt.catch
-    (fun () -> send_and_poll)
-    (fun exc ->
-      match exc with
-      | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
-        let* () = Lwt_unix.close socket in
-        Lwt.return_unit
-      | _ ->
-        let* () = Lwt_unix.close socket in
-        Lwt.fail exc)
+      let* () = write_message output Message msg in
+      loop()
+    in loop() 
+  in 
+  Lwt.catch
+  (fun () -> Lwt.pick [send; poll])
+  ( fun exc ->
+    match exc with
+    | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
+      let* () = Lwt_unix.close socket in
+      Lwt.return_unit
+    | exc ->
+      let* () = Lwt_unix.close socket in
+      Lwt.fail exc)
 
-let validated_address (address) =
+let validated_address address =
   match (try Some (Unix.inet_addr_of_string address) with _ -> None) with
   | Some inet_addr -> inet_addr
   | None -> 
@@ -122,14 +138,7 @@ let connect socket address =
     (fun exc ->
       let* () = Lwt_io.printf "Connection error: %s\n" (Printexc.to_string exc) in
       Lwt.fail exc) 
-
-let rec check_exit() = 
-    let* input = Lwt_io.read_line Lwt_io.stdin in
-    if String.lowercase_ascii input = "exit" then 
-      exit 0
-    else
-      check_exit()
-
+        
 let rec listen socket =
   let handle_client (client_socket, _) =
     let* () = Lwt_io.printl "Client joined the server!" in
@@ -164,9 +173,9 @@ let () =
         let (host, port) = 
           match m, argc with
           | _,2 -> (default_host, default_port)  (* server with default port OR client with default host and default port*)
-          | "--server",3 -> (default_host, Sys.argv.(2))  (* server with specific port *)
-          | "--client",3 -> (Sys.argv.(2), default_port)  (* client with specific host, default port *)
-          | "--client",4 -> (Sys.argv.(2), Sys.argv.(3))  (* client with specific host and port *)
+          | "SERVER", 3 -> (default_host, Sys.argv.(2))  (* server with specific port *)
+          | "CLIENT", 3 -> (Sys.argv.(2), default_port)  (* client with specific host, default port *)
+          | "CLIENT", 4 -> (Sys.argv.(2), Sys.argv.(3))  (* client with specific host and port *)
           | _,_ -> 
             Printf.printf "%s" usage;
             exit 1
@@ -175,7 +184,7 @@ let () =
           let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
           Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
           Lwt_unix.setsockopt socket Unix.TCP_NODELAY true; 
-          let address = if ((!mode) = "--server") then Unix.inet_addr_any else (validated_address host) in
+          let address = if ((!mode) = "SERVER") then Unix.inet_addr_any else (validated_address host) in
           let sockaddr = Unix.ADDR_INET (address, port) in
           Lwt_main.run (
           match m with

@@ -14,17 +14,31 @@ let connected = ref false
 let create_socket () =
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
-  Lwt_unix.setsockopt socket Unix.SO_REUSEPORT true;
   Lwt_unix.setsockopt socket Unix.SO_KEEPALIVE true;
-    (* Lwt_unix.setsockopt socket Unix.TCP_NODELAY true; not making assumptions about message size *)
   socket
 
 let usage = 
   let program_name = Sys.argv.(0) in 
     Printf.sprintf "Usage: ./%s --server [PORT] OR ./%s --client HOST [PORT]\n" program_name program_name 
 
-let get_time() = 
-(Mtime_clock.now_ns ())
+let message_byte = function
+  | Message -> '\x01'
+  | Receipt -> '\x02'
+
+let byte_to_message = function
+  | '\x01' -> Message
+  | '\x02' -> Receipt
+  | _ -> failwith "Invalid message type."
+
+let run_with_error_handling err_name f  =
+    Lwt.catch f
+    (fun exn ->
+      let* () = Lwt_io.eprintlf "Error in %s: %s" err_name (Printexc.to_string exn) in
+      match exn with
+      | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
+        let* () = Lwt_io.printlf "Connection closed." in 
+        Lwt.return_unit
+      | _ -> Lwt.return_unit)
 
 let interpret_message channel = 
   let rec read input_channel buffer pos len = 
@@ -36,11 +50,7 @@ let interpret_message channel =
   let header = Bytes.create 13 in 
   let* result = read channel header 0 13 in 
   if not result then Lwt.return_none else 
-  let msg_type = match Bytes.get header 0 with 
-    | '\x01' -> Message 
-    | '\x02' -> Receipt
-    | _ -> failwith "Invalid message type."
-  in 
+  let msg_type =  byte_to_message (Bytes.get header 0) in 
   let sent_time = Bytes.get_int64_be header 1 in
   let msg_len = Bytes.get_int32_be header 9 |> Int32.to_int in
   let msg = Bytes.create msg_len in 
@@ -49,15 +59,14 @@ let interpret_message channel =
   Lwt.return_some (msg_type, sent_time, msg)
 
 let write_message output_channel msg_type msg = 
-  let msg = (Bytes.of_string msg) in 
+  let msg = Bytes.of_string msg in
+  let msg_type = (message_byte msg_type) in
+  let send_time = Mtime_clock.now_ns () in
   let msg_len = Bytes.length msg in 
+  
   let header = Bytes.create 13 in 
-  let type_char = match msg_type with 
-    | Message -> '\x01'
-    | Receipt -> '\x02'
-  in
-  Bytes.set header 0 type_char;
-  Bytes.set_int64_be header 1 (get_time());
+  Bytes.set header 0 msg_type; 
+  Bytes.set_int64_be header 1 send_time; 
   Bytes.set_int32_be header 9 (Int32.of_int msg_len);
 
   let* () = Lwt_io.write_from_exactly output_channel header 0 13 in 
@@ -74,37 +83,25 @@ let stdin_stream  =
     in loop ());
     stream 
 
-let cmd_stream = Lwt_stream.clone stdin_stream
-let send_stream = Lwt_stream.clone stdin_stream
+let message_channel = Lwt_mvar.create_empty ()
 
-let rec take_cmds () = 
-  let* line = Lwt_stream.next cmd_stream in 
+let rec stdin_handler () = 
+  let* line = Lwt_stream.next stdin_stream in 
   match (String.lowercase_ascii line) with 
-  | "/exit" -> (*add kick*)
-    exit 0
-  | "/status" ->
-    let status = match !connected with
-    | true -> "Connected"
-    | false -> "Not connected"
-    in
-    let* () = Lwt_io.printlf "Status: %s (%s mode)" status !mode in
-    take_cmds ()
+  | "/exit" -> 
+    exit 0;
   | _ ->
-    if !mode = "SERVER" && not !connected then 
-      let* () = Lwt_io.printlf "Command unknown. No active client connection."
-      in
-      take_cmds ()
-  else 
-    take_cmds ()
+    if !mode = "--SERVER" && not !connected then 
+      let* () = Lwt_io.printlf "Command unknown. No active client connection." in 
+      stdin_handler()
+    else 
+      let* () = Lwt_mvar.put message_channel line in 
+      stdin_handler()
 
 let connect socket address =
-  Lwt.catch
-    (fun () -> Lwt_unix.connect socket address)
-    (fun exc ->
-      let* () = Lwt_io.printf "Connection error: %s\n" (Printexc.to_string exc) in
-       Lwt.fail exc) 
+  run_with_error_handling "connecting" (fun () -> Lwt_unix.connect socket address)
 
-let converse socket = 
+let converse socket  = 
   let input = Lwt_io.of_fd ~mode:Lwt_io.input socket in 
   let output = Lwt_io.of_fd ~mode:Lwt_io.output socket in
 
@@ -112,12 +109,13 @@ let converse socket =
     let rec loop() = 
       let* msg = interpret_message input in 
       match msg with 
-      | None ->        
+      | None ->
         let* () = Lwt_io.printlf "Connection closed." in
+        connected := false;
         Lwt.return_unit
       | Some (msg_type, sent_time, contents) -> 
-        let received_time = get_time() in
-        let sender = if (!mode = "SERVER") then "client" else "server" in 
+        let received_time = Mtime_clock.now_ns () in
+        let sender = if (!mode = "--SERVER") then "client" else "server" in 
         match msg_type with 
         | Message -> 
           let* () = write_message output Receipt (Int64.to_string sent_time) in 
@@ -132,38 +130,40 @@ let converse socket =
   in 
   let send = 
     let rec loop() = 
-      let* msg = Lwt_stream.next send_stream in 
-          let* () = write_message output Message msg in
-          loop()
-    in loop() 
+      let* msg = Lwt_mvar.take message_channel in
+      let* () =  write_message output Message msg in
+      loop()
+    in loop()
   in 
-  Lwt.catch
-  (fun () -> Lwt.pick [send; poll])
-  (fun exc ->
-    match exc with
-    | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
-      let* () = Lwt_io.printlf "Connection reset by peer." in
-      connected := false;
-      Lwt.return_unit
-    | exc ->
-      Lwt.return_unit
-    )
+  run_with_error_handling "conversing" (fun () -> Lwt.pick [send; poll])
 
 let validated_address address =
-  match (try Some (Unix.inet_addr_of_string address) with _ -> None) with
-  | Some inet_addr -> inet_addr
-  | None -> 
-    match (try Some (Unix.(gethostbyname address).h_addr_list.(0)) with _ -> None) with
-    | None -> 
-      Printf.printf "Could not establish host.";
+  try
+    let inet_addr = Unix.inet_addr_of_string address in
+    inet_addr
+  with
+  | Unix.Unix_error (Unix.EINVAL, _, _) ->
+      (try
+        let host = Unix.(gethostbyname address).h_addr_list.(0) in
+        host
+      with
+      | Unix.Unix_error (Unix.EHOSTUNREACH, _, _) -> 
+          Printf.printf "Could not resolve host.\n";
+          exit 1
+      | _ -> 
+          Printf.printf "Could not resolve host: %s.\n" address;
+          exit 1)
+  | _ -> 
+      Printf.printf "Invalid IP address format: %s.\n" address;
       exit 1
-    | Some host -> host
 
 let handle_client client =     
   let output = Lwt_io.of_fd ~mode:Lwt_io.Output client in
-  let* () = Lwt_io.printl "Client joined the server!" in
+  let* () = Lwt_stream.junk_old stdin_stream in
+  let* () = Lwt_io.printl "Client joined the server!\nSending welcome message!" in
   let* () = write_message output Message "Welcome to the server!" in
-  let* () = Lwt.catch (fun () -> converse client) (fun _ -> Lwt.return_unit) in
+  let* () = run_with_error_handling "client handling" (fun () -> converse client) in
+  connected := false;
   let* () = Lwt_unix.close client in
   Lwt.return_unit
 
@@ -171,7 +171,7 @@ let rec server_loop sockaddr =
   let server_socket = create_socket () in
   let* () = Lwt_unix.bind server_socket sockaddr in
   Lwt_unix.listen server_socket 1;
-  let* () = Lwt_io.printlf "Server listening for a connection..." in
+  let* () = Lwt_io.printlf "Listening for a connection..." in
   
   let* result =
     Lwt.catch
@@ -179,13 +179,11 @@ let rec server_loop sockaddr =
         let* (client, _) = Lwt_unix.accept server_socket in
         connected := true;
         Lwt.return_some client)
-      (fun exc ->
-        let* () = Lwt_io.eprintlf "Error accepting connection: %s" (Printexc.to_string exc) in
+      (fun exn ->
+        let* () = Lwt_io.eprintlf "Error in server accept: %s" (Printexc.to_string exn) in
         Lwt.return_none)
   in
-  
   let* () = Lwt_unix.close server_socket in
-  
   match result with
   | Some client -> 
       let* () = handle_client client in
@@ -199,34 +197,34 @@ let () =
   if argc < 2 then
     Printf.printf "%s" usage
   else
-    mode := (String.sub (String.uppercase_ascii Sys.argv.(1)) 2 6);
+    mode := (String.uppercase_ascii Sys.argv.(1));
     match !mode with
-    | m when m = "CLIENT" || m = "SERVER" ->
+    | m when m = "--CLIENT" || m = "--SERVER" ->
         let default_port = "8080" in          
         let default_host = "127.0.0.1" in
         let (host, port) = 
           match m, argc with
           | _,2 -> (default_host, default_port)  (* server with default port OR client with default host and default port*)
-          | "SERVER", 3 -> (default_host, Sys.argv.(2))  (* server with specific port *)
-          | "CLIENT", 3 -> (Sys.argv.(2), default_port)  (* client with specific host, default port *)
-          | "CLIENT", 4 -> (Sys.argv.(2), Sys.argv.(3))  (* client with specific host and port *)
+          | "--SERVER", 3 -> (default_host, Sys.argv.(2))  (* server with specific port *)
+          | "--CLIENT", 3 -> (Sys.argv.(2), default_port)  (* client with specific host, default port *)
+          | "--CLIENT", 4 -> (Sys.argv.(2), Sys.argv.(3))  (* client with specific host and port *)
           | _,_ -> 
             Printf.printf "%s" usage;
             exit 1
           in
           let port = int_of_string port in
-          let address = if ((!mode) = "SERVER") then Unix.inet_addr_any else (validated_address host) in
+          let address = if ((!mode) = "--SERVER") then Unix.inet_addr_any else (validated_address host) in
           let sockaddr = Unix.ADDR_INET (address, port) in
           Lwt_main.run (
           match m with
-          | "SERVER" -> 
+          | "--SERVER" -> 
             let* () = Lwt_io.printlf "Server running! (Port: %d)" port in  
-            Lwt.pick[take_cmds(); server_loop sockaddr]
-          | "CLIENT" -> 
+            Lwt.join[stdin_handler(); server_loop sockaddr]
+          | "--CLIENT" -> 
             let socket = create_socket () in 
             let* () = connect socket sockaddr in
             connected := true;
-            let* () = Lwt.pick[take_cmds(); converse socket] in 
+            let* () = Lwt.pick[stdin_handler(); converse socket] in 
             Lwt.return_unit
           | _ -> failwith "bad mode passed in"
           )

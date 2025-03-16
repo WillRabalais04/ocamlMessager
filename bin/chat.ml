@@ -99,7 +99,9 @@ let rec stdin_handler () =
       stdin_handler()
 
 let connect socket address =
-  run_with_error_handling "connecting" (fun () -> Lwt_unix.connect socket address)
+  let connection_attempt = Lwt_unix.connect socket address in
+  let timeout_promise = Lwt_unix.sleep 5.0 >>= fun () -> Lwt.fail (Failure "Connection timed out") in
+  Lwt.pick [connection_attempt; timeout_promise]
 
 let converse socket  = 
   let input = Lwt_io.of_fd ~mode:Lwt_io.input socket in 
@@ -160,7 +162,7 @@ let validated_address address =
 let handle_client client =     
   let output = Lwt_io.of_fd ~mode:Lwt_io.Output client in
   let* () = Lwt_stream.junk_old stdin_stream in
-  let* () = Lwt_io.printl "Client joined the server!\nSending welcome message!" in
+  let* () = Lwt_io.printl "Client joined the server!\nSending welcome message..." in
   let* () = write_message output Message "Welcome to the server!" in
   let* () = run_with_error_handling "client handling" (fun () -> converse client) in
   connected := false;
@@ -222,7 +224,9 @@ let () =
             Lwt.join[stdin_handler(); server_loop sockaddr]
           | "--CLIENT" -> 
             let socket = create_socket () in 
-            let* () = connect socket sockaddr in
+            let* () = run_with_error_handling "connecting" (fun () -> 
+            let* () = Lwt_io.printlf "Connecting to %s:%d..." host port in
+            connect socket sockaddr) in
             connected := true;
             let* () = Lwt.pick[stdin_handler(); converse socket] in 
             Lwt.return_unit

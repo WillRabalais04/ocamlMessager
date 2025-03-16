@@ -21,5 +21,6 @@
  (description "A longer description")
  (depends ocaml dune)
  (tags
-  (topics "to describe" your project)))
+  (topics "to describe" your project))
+  (allow_empty))
 
